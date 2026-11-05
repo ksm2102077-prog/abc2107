@@ -27,8 +27,8 @@
   --deck-h: min(246px, 44vh);
   --r-sm: 8px;
   --r-md: 12px;
-  --gutter-l: max(14px, env(safe-area-inset-left, 0px));
-  --gutter-r: max(14px, env(safe-area-inset-right, 0px));
+  --gutter-l: max(16px, env(safe-area-inset-left, 0px));
+  --gutter-r: max(16px, env(safe-area-inset-right, 0px));
 }
 
 * { box-sizing: border-box; }
