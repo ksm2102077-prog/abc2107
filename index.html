@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>反射ガイド for モンスト</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<meta name="description" content="スクショに敵やブロックを置いて、何回先までも反射する軌道を確認できるガイド。">
+<meta name="theme-color" content="#0b0e1a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="反射ガイド">
+<meta name="format-detection" content="telephone=no">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+<!-- BUILD:STANDALONE-ONLY -->
+<style>
+  html { padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); box-sizing: border-box; }
+</style>
+<!-- /BUILD:STANDALONE-ONLY -->
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+<div id="app" class="app">
+  <header class="bar">
+    <button class="icon-btn" id="btnMenu" type="button" aria-label="メニュー" aria-haspopup="true">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+    </button>
+    <div class="brand" aria-label="反射ガイド">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <span class="brand-name">反射ガイド</span>
+    </div>
+    <button class="pill-btn" id="btnImage" type="button">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="5" width="17" height="14" rx="2.5"/><circle cx="9" cy="10" r="1.8"/><path d="M5 17l4.5-4.5 3 3 2.5-2.5L19 17"/></svg>
+      <span>スクショ</span>
+    </button>
+  </header>
+
+  <main class="stage" id="stage">
+    <div class="board-wrap" id="boardWrap">
+      <canvas id="board" aria-label="盤面"></canvas>
+      <div class="hud hud-top">
+        <span class="chip chip-sample" id="chipSample" hidden>サンプル盤面</span>
+        <button class="chip chip-btn" id="btnZoomReset" type="button" hidden>等倍に戻す</button>
+      </div>
+      <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+    </div>
+  </main>
+
+  <section class="deck" id="deck">
+    <div class="tabs" role="tablist">
+      <button class="tab is-on" id="tabAim" role="tab" aria-selected="true" type="button">照準</button>
+      <button class="tab" id="tabEdit" role="tab" aria-selected="false" type="button">配置</button>
+      <div class="tab-aside">
+        <button class="mini-btn" id="btnUndo" type="button" aria-label="元に戻す" disabled>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 7L4 12l5 5"/><path d="M4.5 12H14a5.5 5.5 0 010 11h-2"/></svg>
+        </button>
+        <button class="mini-btn" id="btnRedo" type="button" aria-label="やり直す" disabled>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 7l5 5-5 5"/><path d="M19.5 12H10a5.5 5.5 0 000 11h2"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <!-- 照準 -->
+    <div class="panel" id="panelAim">
+      <div class="readout">
+        <div class="angle">
+          <span class="dial" id="dial" aria-hidden="true"><i id="dialNeedle"></i></span>
+          <button id="angleOut" class="angle-num" type="button" aria-label="角度を数字で入力">0.0°</button>
+          <input id="angleEdit" class="angle-edit" type="number" inputmode="decimal" step="0.1" min="0" max="360" aria-label="角度（度）" hidden>
+        </div>
+        <div class="first-hit" id="firstHit">—</div>
+      </div>
+      <div class="fine-row">
+        <button class="fine" type="button" data-step="-1">−1°</button>
+        <button class="fine" type="button" data-step="-0.1">−0.1°</button>
+        <div class="jog" id="jog" role="slider" aria-label="なぞって微調整" aria-valuemin="0" aria-valuemax="360" tabindex="0">
+          <div class="jog-ticks" id="jogTicks"></div>
+          <span class="jog-label">← なぞって微調整 →</span>
+        </div>
+        <button class="fine" type="button" data-step="0.1">+0.1°</button>
+        <button class="fine" type="button" data-step="1">+1°</button>
+      </div>
+      <div class="opt-row">
+        <div class="stepper" aria-label="反射回数">
+          <span class="stepper-label">反射</span>
+          <button class="step-btn" id="bounceMinus" type="button" aria-label="反射回数を減らす">−</button>
+          <output class="step-val" id="bounceOut">10</output>
+          <button class="step-btn" id="bouncePlus" type="button" aria-label="反射回数を増やす">＋</button>
+        </div>
+        <div class="seg" role="radiogroup" aria-label="自キャラのタイプ">
+          <button class="seg-btn is-on" type="button" data-kind="reflect" role="radio" aria-checked="true">反射</button>
+          <button class="seg-btn" type="button" data-kind="pierce" role="radio" aria-checked="false">貫通</button>
+        </div>
+      </div>
+      <div class="summary" id="summary"></div>
+    </div>
+
+    <!-- 配置 -->
+    <div class="panel" id="panelEdit" hidden>
+      <div class="add-row">
+        <button class="add-btn" id="addEnemy" type="button"><span class="swatch sw-enemy"></span>敵</button>
+        <button class="add-btn" id="addBlock" type="button"><span class="swatch sw-block"></span>ブロック</button>
+        <button class="add-btn" id="addAlly" type="button"><span class="swatch sw-ally"></span>味方</button>
+        <button class="add-btn add-ball" id="selBall" type="button"><span class="swatch sw-ball"></span>自キャラ</button>
+      </div>
+      <div class="cands" id="cands" hidden>
+        <div class="cands-text">スクショからキャラを見つけました。<b>自キャラ</b>をタップ（残りは味方になります）</div>
+        <div class="cands-row" id="candsRow"></div>
+      </div>
+      <div class="props" id="props"></div>
+    </div>
+  </section>
+</div>
+
+<!-- メニュー -->
+<div class="sheet-scrim" id="scrim" hidden></div>
+<div class="sheet" id="sheetMenu" role="dialog" aria-label="メニュー" hidden>
+  <div class="sheet-grab" aria-hidden="true"></div>
+  <nav class="menu-list">
+    <button class="menu-item" type="button" data-act="save">今の配置を保存</button>
+    <button class="menu-item" type="button" data-act="layouts">保存した配置を開く</button>
+    <button class="menu-item" type="button" data-act="calib">盤面の位置合わせ（スクショ）</button>
+    <button class="menu-item" type="button" data-act="clearImage">スクショを外す（白紙の盤面）</button>
+    <button class="menu-item" type="button" data-act="clearObjects">敵・ブロック・味方をすべて消す</button>
+    <button class="menu-item" type="button" data-act="settings">設定</button>
+    <button class="menu-item" type="button" data-act="help">使い方</button>
+  </nav>
+</div>
+
+<div class="sheet" id="sheetSave" role="dialog" aria-label="配置を保存" hidden>
+  <div class="sheet-grab" aria-hidden="true"></div>
+  <h2 class="sheet-title">今の配置を保存</h2>
+  <form id="saveForm" class="save-form">
+    <label class="field-label" for="saveName">名前</label>
+    <input id="saveName" class="text-input" type="text" maxlength="40" autocomplete="off" enterkeyhint="done">
+    <div class="sheet-actions">
+      <button class="btn ghost" type="button" data-close>やめる</button>
+      <button class="btn primary" type="submit">保存する</button>
+    </div>
+  </form>
+</div>
+
+<div class="sheet tall" id="sheetLayouts" role="dialog" aria-label="保存した配置" hidden>
+  <div class="sheet-grab" aria-hidden="true"></div>
+  <h2 class="sheet-title">保存した配置</h2>
+  <div class="layout-list" id="layoutList"></div>
+  <div class="sheet-actions"><button class="btn ghost" type="button" data-close>閉じる</button></div>
+</div>
+
+<div class="sheet tall" id="sheetSettings" role="dialog" aria-label="設定" hidden>
+  <div class="sheet-grab" aria-hidden="true"></div>
+  <h2 class="sheet-title">設定</h2>
+  <div class="settings">
+    <div class="set-group">
+      <div class="set-head">照準の操作</div>
+      <div class="seg wide" role="radiogroup" aria-label="照準の操作">
+        <button class="seg-btn" type="button" data-control="pull" role="radio">引っ張る（モンストと同じ）</button>
+        <button class="seg-btn" type="button" data-control="point" role="radio">打ちたい方向をさす</button>
+      </div>
+    </div>
+    <div class="set-group">
+      <div class="set-head">線の表示</div>
+      <label class="check"><input type="checkbox" id="optNumbers"><span>反射の番号</span></label>
+      <label class="check"><input type="checkbox" id="optBand"><span>自キャラの幅（当たり判定の帯）</span></label>
+      <label class="check"><input type="checkbox" id="optPull"><span>引っ張る向きの線</span></label>
+      <label class="check"><input type="checkbox" id="optVisual"><span>キャラの見た目の円（点線）</span></label>
+    </div>
+    <div class="set-group">
+      <div class="set-head">自キャラの当たり判定 <output id="ballROut" class="set-val"></output></div>
+      <input type="range" id="ballR" min="0.030" max="0.070" step="0.0005" aria-label="自キャラの当たり判定の半径">
+      <div class="set-note">盤面の横幅に対する半径。実測では 4.55%（見た目の円は約 8.2%）。ふだんは変えなくて大丈夫です。</div>
+      <button class="btn ghost small" type="button" id="ballRReset">実測値に戻す</button>
+    </div>
+    <div class="set-group">
+      <div class="set-head">データ</div>
+      <button class="btn danger small" type="button" id="wipeAll">保存データをすべて消す</button>
+      <div class="confirm" id="wipeConfirm" hidden>
+        <span>保存した配置とスクショも消えます。</span>
+        <button class="btn danger small" type="button" id="wipeYes">消す</button>
+        <button class="btn ghost small" type="button" id="wipeNo">やめる</button>
+      </div>
+    </div>
+  </div>
+  <div class="sheet-actions"><button class="btn primary" type="button" data-close>閉じる</button></div>
+</div>
+
+<div class="sheet tall" id="sheetHelp" role="dialog" aria-label="使い方" hidden>
+  <div class="sheet-grab" aria-hidden="true"></div>
+  <h2 class="sheet-title">使い方</h2>
+  <div class="help">
+    <ol class="steps">
+      <li><b>スクショを撮る</b><span>モンストのバトル画面でスクショ（サイドボタン＋音量を上げるボタン）。「設定 → アクセシビリティ → タッチ → 背面タップ」でスクショを割り当てると、iPhoneの背中を2回たたくだけで撮れます。</span></li>
+      <li><b>読み込む</b><span>右上の「スクショ」から選ぶと、盤面の位置を自動で合わせます。キャラが見つかったら、自キャラをタップ。</span></li>
+      <li><b>配置する</b><span>「配置」タブで敵・ブロック・味方を置き、敵の円を見た目に合わせて大きさを調整。2本指で拡大できます。</span></li>
+      <li><b>狙う</b><span>「照準」タブで盤面を引っ張ると、何回先までも反射する線が出ます。細かい角度は ±ボタンかバーをなぞって。</span></li>
+      <li><b>モンストで打つ</b><span>「最初に当たる場所」（例: 右の壁の上から38%）に矢印を向けて打ちます。</span></li>
+    </ol>
+    <div class="help-block">
+      <h3>ホーム画面に追加する</h3>
+      <p>Safari で開き、共有ボタン（□に↑）→「ホーム画面に追加」。アイコンから全画面で起動でき、電波がなくても使えます。</p>
+    </div>
+    <div class="help-block">
+      <h3>当たり判定について</h3>
+      <p>実機のスクショで測った値を使っています。盤面の縦横比は 8:9、左右の壁は画面の端、自キャラの判定は見た目の円より小さい半径（盤面の横幅の約4.55%）です。</p>
+      <p>敵の判定は円として扱います。ボスによっては見た目と判定がずれていることがあり、弱点の出っ張りや、当たった時に敵が少し下がる動き（ヒットバック）までは再現しません。線どおりにならない時は、敵の円を少し小さく・大きくして試してください。</p>
+    </div>
+    <div class="help-block">
+      <h3>このアプリについて</h3>
+      <p>個人が作った非公式のツールです。モンスターストライクの運営とは関係ありません。ゲームのデータには触れず、スクショを見て計算しているだけです。</p>
+      <p class="muted" id="versionText"></p>
+    </div>
+  </div>
+  <div class="sheet-actions"><button class="btn primary" type="button" data-close>閉じる</button></div>
+</div>
+
+<!-- 盤面の位置合わせ -->
+<div class="calib" id="calib" hidden>
+  <div class="calib-head">
+    <div class="calib-title">盤面の位置合わせ</div>
+    <div class="calib-note" id="calibNote">枠を上下にドラッグして、下の黄色いパネルの上端に合わせてください。</div>
+  </div>
+  <div class="calib-body" id="calibBody"><canvas id="calibCanvas" aria-label="スクショ全体"></canvas></div>
+  <div class="calib-foot">
+    <div class="calib-nudge">
+      <button class="fine" type="button" data-nudge="-10">▲10</button>
+      <button class="fine" type="button" data-nudge="-1">▲1</button>
+      <output id="calibOut" class="calib-out"></output>
+      <button class="fine" type="button" data-nudge="1">▼1</button>
+      <button class="fine" type="button" data-nudge="10">▼10</button>
+    </div>
+    <div class="calib-actions">
+      <button class="btn ghost" type="button" id="calibAuto">自動で合わせ直す</button>
+      <button class="btn primary" type="button" id="calibDone">完了</button>
+    </div>
+  </div>
+</div>
+
+<div class="busy" id="busy" hidden><div class="busy-box"><span class="spinner" aria-hidden="true"></span><span id="busyText">読み込み中…</span></div></div>
+
+<input type="file" id="fileInput" accept="image/*" hidden>
+
+<script src="js/physics.js"></script>
+<script src="js/detect.js"></script>
+<script src="js/store.js"></script>
+<script src="js/app.js"></script>
+<!-- BUILD:STANDALONE-ONLY -->
+<script>
+  if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1')) {
+    window.addEventListener('load', function () {
+      navigator.serviceWorker.register('sw.js').catch(function () {});
+    });
+  }
+</script>
+<!-- /BUILD:STANDALONE-ONLY -->
+</body>
+</html>

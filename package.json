@@ -1,0 +1,13 @@
+{
+  "name": "reflect-guide",
+  "version": "1.0.0",
+  "private": true,
+  "description": "モンスト用の反射ガイド（スクショに配置して、何回先までも反射する軌道を表示する非公式ツール）",
+  "scripts": {
+    "test": "node --test tests/physics.test.js tests/detect.test.js",
+    "e2e": "node tests/e2e.mjs",
+    "build:artifact": "node tools/build-artifact.mjs",
+    "icons": "python3 tools/make_icons.py",
+    "fixture": "python3 tools/make_fixture.py"
+  }
+}
