@@ -15,7 +15,7 @@
     set(k, v) { try { localStorage.setItem('sn_' + k, JSON.stringify(v)); } catch (e) { /* 保存できない環境 */ } }
   };
   SN.store = store;
-  SN.settings = Object.assign({ quality: 'high', gyro: false, gyroSens: 0.3, dragSens: 0.7, volume: 0.8, illum: true, hints: true }, store.get('settings', {}));
+  SN.settings = Object.assign({ quality: 'high', gyro: false, gyroSens: 0.3, dragSens: 0.7, volume: 0.8, illum: true, hints: true, difficulty: 'assist', guide: true }, store.get('settings', {}));
   SN.progress = Object.assign({ cleared: {}, best: {}, unlocked: ['r308'] }, store.get('progress', {}));
   SN.saveSettings = () => store.set('settings', SN.settings);
   SN.saveProgress = () => store.set('progress', SN.progress);
@@ -122,7 +122,8 @@
       this.squeeze = -1; this.breakAt = 0;
       this.bullets = []; this.shots = []; this.shotCount = 0; this.coldBore = true;
       this.alertLv = 0; this.detect = 0; this.posShots = 0; this.discoveredT = -1; this.incomingT = 0;
-      this.identified = {}; this.check = { pos: true, range: false, wx: false, pid: false, rng: false, dial: false, wind: false, shot: false, spot: false, exfil: false };
+      this.identified = {}; this.check = { pos: true, look: false, pid: false, rng: false, solve: false, dial: false, aim: false, shot: false, spot: false, exfil: false, range: false, wx: false, wind: false };
+      this.lase = null; this.solution = null; this.pendingCorr = null; this.calcIn = null;
       this.rangeCard = {}; this.spotLog = []; this.events = [];
       this.dragVel = 0; this.lastDragT = 0;
       this.reticleDirty = true;
@@ -135,7 +136,9 @@
       // 初期の照準：基地の方向
       this.aimAt(this.world.base.x, this.world.base.y + 1.2, this.world.base.z);
       this.applyHud();
-      this.say(mission.kind === 'training' ? '準備はいいか。まず観測スコープで鉄板の大きさを測ろう。距離が分かったらDOPEだ。' : '位置についた。焦るな。まずはレンジカードと気象からだ。', 6);
+      this.say(SN.settings.difficulty === 'manual'
+        ? (mission.kind === 'training' ? '準備はいいか。まず観測スコープで鉄板の大きさを測ろう。距離が分かったらDOPEだ。' : '位置についた。焦るな。まずはレンジカードと気象からだ。')
+        : '位置についた。左上に今やることが出る。まずは観測スコープで標的を探そう。', 7);
       this.lastFrame = performance.now();
       this.raf = 0;
       this.loop = this.loop.bind(this);
@@ -678,12 +681,17 @@
         this.check.spot = true;
         const res = rec.result;
         if (!res || res.kind === 'lost' || !hit) { this.say('着弾が見えなかった。かなり外れてる。', 4); return; }
-        if (res.kind === 'plate') { this.say('命中！ ' + res.text.replace(/（.*/, '') + '。鉄板が揺れてる。', 4); return; }
+        this.pendingCorr = null; $('btn-corr').hidden = true;
+        if ((res.kind === 'plate' || res.kind === 'actor' || res.kind === 'engine') && !this.objDone) {
+          this.check.rng = false; this.check.solve = false; this.check.dial = false; this.check.aim = false;
+          this.holdNote = 0;
+        }
+        if (res.kind === 'plate') { this.say('命中！ ' + res.text.replace(/（.*/, '') + '。鉄板が揺れてる。' + (this.objDone ? '' : '次の鉄板だ。また測距からやり直そう。'), 6); return; }
         if (res.kind === 'actor') {
           const a = this.actors.find(x => x.id === res.actor);
           const what = a.role === 'civ' ? '民間人' : res.who;
           const st = !a.alive ? '倒れた。動かない。' : (a.down ? '倒れたが、まだ動いてる。' : '当たったが倒れてない。遮蔽物へ逃げた。');
-          this.say('命中、' + what + '。' + res.partName + 'だ。' + st, 6);
+          this.say('命中、' + what + '。' + res.partName + 'だ。' + st + (this.objDone || this.m.objective.ids.length < 2 ? '' : ' 次の標的を測り直せ。'), 7);
           return;
         }
         if (res.kind === 'engine') { this.say(res.text, 5); return; }
@@ -697,7 +705,18 @@
           else if (ref.ref && ref.ref.engineLocal) tgt = ref.ref.engineLocal.clone().applyMatrix4(ref.ref.group.matrixWorld);
         }
         if (!tgt) { this.say('外れ。着弾は見えたが、何を狙ってたか分からない。', 4); return; }
-        const a1 = angles(e, rec.point), a0 = angles(e, tgt);
+        // 弾の軌跡（トレース）が標的の距離を通った点で読む。標的より奥に落ちた土煙だけで読むと下に見えてしまうため。
+        let pt = rec.point;
+        const td = tgt.distanceTo(e);
+        if (rec.point.distanceTo(e) > td + 1 && rec.trail && rec.trail.length > 1) {
+          for (let i = 1; i < rec.trail.length; i++) {
+            const q0 = new THREE.Vector3(rec.trail[i - 1][1], rec.trail[i - 1][2], rec.trail[i - 1][3]);
+            const q1 = new THREE.Vector3(rec.trail[i][1], rec.trail[i][2], rec.trail[i][3]);
+            const d0 = q0.distanceTo(e), d1 = q1.distanceTo(e);
+            if (d0 <= td && d1 >= td) { pt = q0.lerp(q1, (td - d0) / Math.max(1e-6, d1 - d0)); break; }
+          }
+        }
+        const a1 = angles(e, pt), a0 = angles(e, tgt);
         let dx = (a1.yaw - a0.yaw); while (dx > Math.PI) dx -= 2 * Math.PI; while (dx < -Math.PI) dx += 2 * Math.PI;
         dx = dx * Math.cos(a0.pitch) * 1000 + gauss() * 0.04;
         const dy = (a1.pitch - a0.pitch) * 1000 + gauss() * 0.04;
@@ -705,16 +724,18 @@
         if (Math.abs(dx) > 12 || Math.abs(dy) > 12) { this.say('外れ。着弾は大きく外れてる。距離と風を見直せ。', 5); return; }
         const lr = dx >= 0 ? '右' : '左', ud = dy >= 0 ? '上' : '下';
         const cLR = dx >= 0 ? '左' : '右', cUD = dy >= 0 ? '下' : '上';
+        this.pendingCorr = { e: -dy, w: -dx, t: this.gt };
+        const bc = $('btn-corr');
+        bc.textContent = '修正を反映（' + cUD + fmt1(Math.abs(dy)) + '・' + cLR + fmt1(Math.abs(dx)) + '）';
+        bc.hidden = false;
         this.say('外れ。着弾は' + ref.label + 'の' + lr + fmt1(Math.abs(dx)) + '・' + ud + fmt1(Math.abs(dy)) + 'MIL。修正、' + cUD + fmt1(Math.abs(dy)) + '、' + cLR + fmt1(Math.abs(dx)) + '。', 8);
       }, 350 + Math.random() * 300);
     }
 
-    askWind() {
+    askWind(silentEst) {
       this.check.wind = true;
       const ws = this.windSummary(this.gt);
-      // 手前の風ほど弾を大きく流す
-      const eff = ws[0].cross * 0.45 + ws[1].cross * 0.35 + ws[2].cross * 0.2;
-      const est = eff * (1 + gauss() * 0.15) + gauss() * 0.4;
+      const est = silentEst !== undefined ? silentEst : this.spotterWindEstimate();
       const dist = Math.hypot(this.world.base.x - this.pos.x, this.world.base.z - this.pos.z) * (1 + gauss() * 0.03);
       const table = this.dopeAt(this.atm, [Math.round(dist / 50) * 50]);
       const w1 = table.rows[0] ? table.rows[0].wind1 : 0.5;
@@ -723,6 +744,158 @@
       const gusty = Math.abs(ws[0].cross - ws[2].cross) > 1.5 || this.m.wx.gust > 1.5;
       if (Math.abs(est) < 0.4) this.say('横風はほぼない。陽炎はまっすぐ立ちのぼってる。' + (gusty ? 'ただ、向こうで風が回ってる。' : ''), 6);
       else this.say('風は' + from + 'から、横風にして約' + fmt1(Math.abs(est)) + 'm/s。この距離なら' + toward + 'へ' + fmt1(hold) + 'MIL。' + (gusty ? '突風に注意。' : ''), 8);
+    }
+
+    // ---- レーザー測距 ----
+    laser() {
+      if (this.ended) return;
+      if (this.mode === 'eye') { this.hint('測距は観測スコープか照準スコープで行う'); return; }
+      const { yaw, pitch } = this.viewAngles();
+      const e = this.eye(), dir = this.dirFrom(yaw, pitch);
+      let tHit = null, prev = 1;
+      for (let t = 4; t <= 3600; t += 3) {
+        const p = e.clone().addScaledVector(dir, t);
+        if (p.y < this.world.groundAt(p.x, p.z)) {
+          let lo = prev, hi = t;
+          for (let i = 0; i < 20; i++) { const m = (lo + hi) / 2; const q = e.clone().addScaledVector(dir, m); if (q.y < this.world.groundAt(q.x, q.z)) hi = m; else lo = m; }
+          tHit = hi; break;
+        }
+        prev = t;
+      }
+      const L = tHit || 3600;
+      const hit = this.collide(null, e, e.clone().addScaledVector(dir, L));
+      this.audio.click(); setTimeout(() => this.audio.click(), 90);
+      const el = $('hud-lrf');
+      if (!hit && !tHit) { this.lase = null; el.textContent = '測距 −−− m（測定できない）'; el.hidden = false; this.hint('空や遠すぎる所は測れない'); return; }
+      const dist = (hit ? hit.s * L : L) + gauss() * 0.5;
+      let az = (yaw / DEG) % 360; if (az < 0) az += 360;
+      this.lase = { dist, incl: pitch / DEG, az, t: this.gt, kind: hit ? hit.kind : 'ground' };
+      this.check.rng = true;
+      el.textContent = '測距 ' + Math.round(dist) + 'm ∠' + (pitch >= 0 ? '+' : '−') + Math.abs(pitch / DEG).toFixed(1) + '° 方位' + String(Math.round(az) % 360).padStart(3, '0') + '°';
+      el.hidden = false;
+      clearTimeout(this._lrfT); this._lrfT = setTimeout(() => { el.hidden = true; }, 15000);
+      this.applyHud();
+    }
+
+    // ---- 弾道計算（照準点 tgt に当てるダイヤル値を求める） ----
+    // opt: {windAt(p,t) | null, cor, spin, t0}
+    simAim(eye, tgt, eMil, wMil, opt) {
+      const d = tgt.clone().sub(eye), dist = d.length();
+      const yaw = Math.atan2(d.x, -d.z), pitch = Math.atan2(d.y, Math.hypot(d.x, d.z));
+      const los = this.dirFrom(yaw, pitch);
+      const right = new THREE.Vector3().crossVectors(los, new THREE.Vector3(0, 1, 0)).normalize();
+      const upv = new THREE.Vector3().crossVectors(right, los).normalize();
+      const bore = los.clone().addScaledVector(upv, Math.tan(this.zeroA + eMil * 0.001)).addScaledVector(right, Math.tan(wMil * 0.001)).normalize();
+      const mz = eye.clone().addScaledVector(upv, -this.rifle.sightH);
+      const b = { p: [mz.x, mz.y, mz.z], v: [bore.x * this.mvNow, bore.y * this.mvNow, bore.z * this.mvNow], t: 0 };
+      const t0 = opt.t0 || 0;
+      const env = { rho: this.atm.rho, c: this.atm.c, bcSI: this.bcSI, windAt: opt.windAt ? (p, tt) => opt.windAt(p, t0 + tt) : null, omega: opt.cor ? this.omega : null };
+      while (b.t < 12) {
+        B.step(b, 0.001, env);
+        const along = (b.p[0] - eye.x) * los.x + (b.p[1] - eye.y) * los.y + (b.p[2] - eye.z) * los.z;
+        if (along >= dist) break;
+      }
+      const sd = opt.spin ? B.spinDrift(this.sg, b.t) : 0;
+      const hr = new THREE.Vector3(right.x, 0, right.z).normalize();
+      const p = new THREE.Vector3(b.p[0] + hr.x * sd, b.p[1], b.p[2] + hr.z * sd).sub(eye);
+      return { x: p.dot(right) / dist * 1000, y: p.dot(upv) / dist * 1000, tof: b.t, v: Math.hypot(b.v[0], b.v[1], b.v[2]) };
+    }
+    solveAim(eye, tgt, opt) {
+      let e = 0, w = 0, r = null;
+      for (let k = 0; k < 7; k++) { r = this.simAim(eye, tgt, e, w, opt); e -= r.y; w -= r.x; if (Math.abs(r.x) + Math.abs(r.y) < 0.004) break; }
+      return { e, w, tof: r.tof, v: r.v };
+    }
+    // 弾道計算機：距離・傾斜・方位・風（速さと時計の向き）・標的の動きから修正量を出す
+    solveFiring(inp) {
+      const e = this.eye();
+      const los = this.dirFrom(inp.az * DEG, inp.incl * DEG);
+      const tgt = e.clone().addScaledVector(los, inp.range);
+      const to = (inp.az + inp.clock * 30) * DEG + Math.PI;
+      const wv = [Math.sin(to) * inp.ws, 0, -Math.cos(to) * inp.ws];
+      const windAt = inp.ws > 0 ? () => wv : null;
+      const full = this.solveAim(e, tgt, { windAt, cor: true, spin: true });
+      const noWind = this.solveAim(e, tgt, { windAt: null, cor: true, spin: true });
+      const noSpin = this.solveAim(e, tgt, { windAt: null, cor: true, spin: false });
+      const bare = this.solveAim(e, tgt, { windAt: null, cor: false, spin: false });
+      const lead = inp.move ? inp.move * full.tof / inp.range * 1000 : 0;
+      const res = {
+        elev: full.e, windage: full.w, wind: full.w - noWind.w, spin: noWind.w - noSpin.w, corH: noSpin.w - bare.w, corV: noSpin.e - bare.e,
+        lead, tof: full.tof, v: full.v, mach: full.v / this.atm.c, inp: Object.assign({}, inp)
+      };
+      this.solution = res; this.check.solve = true;
+      return res;
+    }
+    applySolution(withLead) {
+      const s = this.solution; if (!s) return;
+      const e = Math.round(s.elev * 10), w = Math.round((s.windage + (withLead ? s.lead : 0)) * 10);
+      this.elev = clamp(e, 0, this.rifle.maxElev * 10); this.wclk = clamp(w, -80, 80);
+      this.check.dial = true; this.check.wind = true;
+      this.audio.click(); setTimeout(() => this.audio.click(), 60); setTimeout(() => this.audio.click(), 120);
+      const over = e - this.elev;
+      this.holdNote = over > 0 ? over / 10 : 0;
+      if (this.holdNote > 0) this.say('エレベーションが足りない。残り' + fmt1(this.holdNote) + 'MILは、レティクルの中心より' + fmt1(this.holdNote) + 'MIL下の目盛りを標的に合わせて撃て。', 9);
+      this.applyHud();
+    }
+    applyCorrection() {
+      const c = this.pendingCorr; if (!c) return;
+      this.elev = clamp(this.elev + Math.round(c.e * 10), 0, this.rifle.maxElev * 10);
+      this.wclk = clamp(this.wclk + Math.round(c.w * 10), -80, 80);
+      this.pendingCorr = null; this.audio.click(); setTimeout(() => this.audio.click(), 70);
+      $('btn-corr').hidden = true;
+      this.applyHud();
+    }
+    spotterWindEstimate() {
+      const ws = this.windSummary(this.gt);
+      const eff = ws[0].cross * 0.45 + ws[1].cross * 0.35 + ws[2].cross * 0.2;
+      return eff * (1 + gauss() * 0.15) + gauss() * 0.4;
+    }
+
+    // ---- 手順ガイド ----
+    guideStep() {
+      const c = this.check, manual = SN.settings.difficulty === 'manual', train = this.m.kind === 'training';
+      if (this.ended) return null;
+      if (this.alertLv >= 3) return { n: '!', title: '見つかった', text: '右上の「任務」を開き、別の射撃位置へ移動するか離脱する。', el: ['tool-task'] };
+      if (this.objDone) return { n: '✓', title: '目標達成', text: '右上の「任務」を開いて「離脱する」を押す。', el: ['tool-task'] };
+      if (this.bullets.length) return { n: '…', title: '着弾を待つ', text: '弾が飛んでいる。着弾と観測手の報告を待つ。', el: [] };
+      if (this.shots.length && !this.chambered && (this.inMag > 0 || this.reserve > 0)) {
+        if (this.boltT > 0 || this.reloadT > 0) return { n: '…', title: '装填中', text: '構えが少しずれるので、終わったら狙い直す。', el: [] };
+        return { n: '→', title: '次の弾を込める', text: '右下の「ボルト」を押す。', el: ['btn-bolt'] };
+      }
+      if (this.pendingCorr) return { n: '→', title: '修正を入れる', text: '観測手の修正を「修正を反映」で入れる（右のダイヤルで自分で回してもいい）。そのあと同じように狙って撃つ。', el: ['btn-corr'] };
+      const steps = [];
+      steps.push({ k: 'look', title: '標的を探す', text: '左の「観測」に切り替え、ドラッグで拠点を見回す。2本指か＋で拡大。', el: ['mode-spot'] });
+      if (this.m.objective.type === 'eliminate') steps.push({ k: 'pid', title: '標的を識別する', text: '観測スコープで人物をタップし、特徴が標的と一致したら「標的と識別」を押す。', el: [] });
+      if (manual) {
+        steps.push({ k: 'rng', title: '距離を測る', text: (train ? '鉄板' : '標的') + 'の高さが何MILか目盛りで測り、右上の「レンジカード」に入力する。', el: ['tool-range'] });
+        steps.push({ k: 'solve', title: 'DOPEを読む', text: '右上の「DOPE」で、距離と気象計の密度高度の列から上の修正量を読む。風は「横風1m/s」×横風の速さ。', el: ['tool-dope'] });
+        steps.push({ k: 'dial', title: 'ダイヤルを回す', text: '右のエレベーション（上下）とウィンデージ（左右）を、読んだ値に合わせる。', el: ['tur-elev', 'tur-wind'] });
+      } else {
+        steps.push({ k: 'rng', title: '距離を測る', text: (train ? '鉄板' : '標的') + 'に十字の中心を合わせ、左の「測距」を押す。', el: ['btn-lrf'] });
+        steps.push({ k: 'solve', title: '照準を計算する', text: '右上の「弾道計算」を開く。測った距離は自動で入る。風を入れ、標的が歩いていれば動きも選ぶ。', el: ['tool-calc'] });
+        steps.push({ k: 'dial', title: 'ダイヤルを合わせる', text: '弾道計算の「ダイヤルに反映」を押す（右のダイヤルを手で回してもいい）。', el: ['tool-calc'] });
+      }
+      steps.push({ k: 'aim', title: '照準スコープで狙う', text: '左の「照準」に切り替え、十字の中心を' + (train ? '鉄板の中心' : '標的の胸') + 'に合わせる。' + (this.holdNote ? '（' + fmt1(this.holdNote) + 'MIL下の目盛りで狙う）' : ''), el: ['mode-rifle'] });
+      steps.push({ k: 'shot', title: '撃つ', text: '「息止め」を押したまま、「引き金」を長押し。ゆっくり絞ると弾が出る。', el: ['btn-breath', 'btn-trigger'] });
+      const i = steps.findIndex(st => !c[st.k]);
+      const st = steps[i < 0 ? steps.length - 1 : i];
+      return { n: (i < 0 ? steps.length : i + 1) + '/' + steps.length, title: st.title, text: st.text, el: st.el };
+    }
+    updateGuide() {
+      const box = $('guide');
+      if (this.check.dial && this.mode === 'rifle') this.check.aim = true;
+      if (!SN.settings.guide) { box.hidden = true; this.setPulse([]); return; }
+      const g = this.guideStep();
+      if (!g) { box.hidden = true; this.setPulse([]); return; }
+      box.hidden = false;
+      $('g-n').textContent = g.n; $('g-title').textContent = g.title; $('g-text').textContent = g.text;
+      this.setPulse(g.el);
+    }
+    setPulse(ids) {
+      const key = ids.join(',');
+      if (key === this._pulseKey) return;
+      this._pulseKey = key;
+      for (const el of document.querySelectorAll('.pulse')) el.classList.remove('pulse');
+      for (const id of ids) { const el = $(id); if (el) el.classList.add('pulse'); }
     }
 
     dopeAt(atm, ranges) {
@@ -755,7 +928,8 @@
       if (this.squeeze >= 0) this.pullTrigger(false);
       this.mode = m;
       for (const b of document.querySelectorAll('#mode-seg button')) b.classList.toggle('on', b.dataset.mode === m);
-      if (m === 'spot') { $('idcard').hidden = true; }
+      if (m === 'spot') { $('idcard').hidden = true; this.check.look = true; }
+      if (m === 'rifle' && this.check.dial) this.check.aim = true;
       this.reticleDirty = true; this.applyHud();
     }
     zoom(dir) {
@@ -782,7 +956,7 @@
     turret(which, d) {
       if (which === 'e') this.elev = clamp(this.elev + d, 0, this.rifle.maxElev * 10);
       else this.wclk = clamp(this.wclk + d, -80, 80);
-      if (which === 'e' && this.elev !== 0) this.check.dial = true;
+      if (which === 'e' && this.elev !== 0) { this.check.dial = true; this.holdNote = 0; }
       if (which === 'w' && this.wclk !== 0) this.check.wind = true;
       this.audio.click();
       if (navigator.vibrate) { try { navigator.vibrate(4); } catch (e) { /* */ } }
@@ -853,11 +1027,13 @@
         cancelAnimationFrame(this.raf);
         this.enableGyro(false);
         this.audio.setWind(0);
+        this.setPulse([]); $('btn-corr').hidden = true; $('hud-lrf').hidden = true;
         SN.UI.debrief(this);
       }, success ? 600 : 2200);
     }
     destroy() {
       cancelAnimationFrame(this.raf); this.endShown = true; this.ended = true;
+      this.setPulse([]); $('btn-corr').hidden = true; $('hud-lrf').hidden = true;
       this.enableGyro(false);
       this.world.scene.traverse(o => { if (o.geometry) o.geometry.dispose(); if (o.material) { (Array.isArray(o.material) ? o.material : [o.material]).forEach(m => m.dispose()); } });
     }
@@ -873,8 +1049,11 @@
       $('zoom-val').textContent = this.mode === 'eye' ? '1×' : (Math.round((this.mode === 'rifle' ? this.mag.rifle : this.mag.spot) * 10) / 10) + '×';
       const o = this.m.objective;
       $('hud-obj').innerHTML = '目標: ' + escapeHtml(o.text) + (this.objDone ? ' <b style="color:var(--ok)">達成</b>' : '');
+      $('btn-lrf').hidden = SN.settings.difficulty === 'manual';
+      $('tool-calc').innerHTML = SN.settings.difficulty === 'manual' ? '気象計' : '弾道<br>計算';
       const trig = $('btn-trigger');
       trig.classList.toggle('blocked', this.mode !== 'rifle' || !this.chambered || this.boltT > 0 || this.reloadT > 0);
+      this.updateGuide();
       $('btn-bolt').textContent = this.reloadT > 0 ? '交換中' : (this.boltT > 0 ? '操作中' : (!this.chambered && this.inMag === 0 && this.reserve > 0 ? '弾倉交換' : 'ボルト'));
     }
     applyHudLive() {
@@ -888,7 +1067,8 @@
       const ch = $('hud-alert');
       if (ch.dataset.lv !== String(this.alertLv)) { ch.dataset.lv = String(this.alertLv); ch.textContent = this.m.noAlert ? '訓練' : names[this.alertLv]; ch.className = 'alert-chip a' + (this.m.noAlert ? 0 : this.alertLv); }
       $('hud-detect').style.width = (this.m.noAlert ? 0 : Math.min(100, this.detect)) + '%';
-      if (this._lastHud === undefined || this.gt - this._lastHud > 0.25) { this._lastHud = this.gt; this.applyHud(); }
+      if (this._lastHud === undefined || this.gt - this._lastHud > 0.25) { this._lastHud = this.gt; this.applyHud(); this.updateGuide(); }
+      if (this.pendingCorr && this.gt - this.pendingCorr.t > 40) { this.pendingCorr = null; $('btn-corr').hidden = true; }
     }
 
     // ---- 描画 ----

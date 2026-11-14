@@ -49,29 +49,34 @@
   <div id="hit-flash"></div>
 
   <div class="hud hud-tl">
-    <div id="hud-obj" class="chip"></div>
     <div class="alert-box"><span id="hud-alert" class="alert-chip a0">平常</span><div class="meter"><i id="hud-detect"></i></div></div>
+    <div id="guide" class="guide" role="status" aria-live="polite">
+      <div class="g-head"><span id="g-n" class="g-n mono">1/7</span><b id="g-title">標的を探す</b></div>
+      <div id="g-text" class="g-text"></div>
+      <div id="hud-obj" class="g-obj"></div>
+    </div>
   </div>
   <div class="hud hud-tc mono"><span id="hud-az">方位 000°</span><span id="hud-inc">傾斜 +0.0°</span><span id="hud-time">00:00</span></div>
   <div class="hud hud-tr">
-    <button class="tool" data-panel="dope">DOPE</button>
-    <button class="tool" data-panel="range">レンジ<br>カード</button>
-    <button class="tool" data-panel="kestrel">気象計</button>
-    <button class="tool" data-panel="task">任務</button>
-    <button class="tool" data-panel="pause" aria-label="一時停止">‖</button>
+    <button class="tool" id="tool-calc" data-panel="calc">弾道<br>計算</button>
+    <button class="tool" id="tool-dope" data-panel="dope">DOPE</button>
+    <button class="tool" id="tool-range" data-panel="range">レンジ<br>カード</button>
+    <button class="tool" id="tool-task" data-panel="task">任務</button>
+    <button class="tool" id="tool-pause" data-panel="pause" aria-label="一時停止">‖</button>
   </div>
 
   <div class="hud hud-left">
     <div class="seg" id="mode-seg">
-      <button data-mode="eye">肉眼</button>
-      <button data-mode="spot">観測</button>
-      <button data-mode="rifle" class="on">照準</button>
+      <button data-mode="eye" id="mode-eye">肉眼</button>
+      <button data-mode="spot" id="mode-spot">観測</button>
+      <button data-mode="rifle" id="mode-rifle" class="on">照準</button>
     </div>
     <div class="zoom">
       <button id="zoom-in" aria-label="拡大">＋</button>
       <span id="zoom-val" class="mono">25×</span>
       <button id="zoom-out" aria-label="縮小">−</button>
     </div>
+    <button id="btn-lrf" class="small-btn lrf-btn">測距</button>
     <button id="btn-wind" class="small-btn">観測手<br>風は？</button>
   </div>
 
@@ -98,6 +103,8 @@
   </div>
 
   <div class="hud hud-bc">
+    <div id="hud-lrf" class="lrf mono" hidden></div>
+    <button id="btn-corr" class="corr" hidden>修正を反映</button>
     <div id="spotter-line" class="spotter"></div>
     <div id="hud-hint" class="hint"></div>
   </div>
