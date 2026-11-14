@@ -8,6 +8,8 @@
     "e2e": "node tests/e2e.mjs",
     "build:artifact": "node tools/build-artifact.mjs",
     "icons": "python3 tools/make_icons.py",
-    "fixture": "python3 tools/make_fixture.py"
+    "fixture": "python3 tools/make_fixture.py",
+    "test:sniper": "node --test sniper/tests/ballistics.test.js",
+    "build:sniper-artifact": "node tools/build-sniper-artifact.mjs"
   }
 }
